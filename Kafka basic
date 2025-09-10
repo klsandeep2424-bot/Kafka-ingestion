@@ -1,0 +1,133 @@
+import json
+import os
+import uuid
+from typing import Optional
+
+from fastapi import FastAPI, File, UploadFile, HTTPException, Body, Query
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from confluent_kafka import Producer
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# --- Kafka config from env ---
+KAFKA_CONF = {
+    "bootstrap.servers": os.getenv("KAFKA_BOOTSTRAP", ""),
+    "security.protocol": "SASL_SSL",
+    "sasl.mechanisms": "PLAIN",
+    "sasl.username": os.getenv("KAFKA_API_KEY", ""),
+    "sasl.password": os.getenv("KAFKA_API_SECRET", ""),
+    "client.id": os.getenv("CLIENT_ID", "group-load-uploader"),
+}
+
+DEFAULT_TOPIC = os.getenv("KAFKA_TOPIC", "")
+
+# Basic sanity checks up front
+missing = [k for k, v in {
+    "KAFKA_BOOTSTRAP": KAFKA_CONF["bootstrap.servers"],
+    "KAFKA_API_KEY": KAFKA_CONF["sasl.username"],
+    "KAFKA_API_SECRET": KAFKA_CONF["sasl.password"],
+    "KAFKA_TOPIC": DEFAULT_TOPIC
+}.items() if not v]
+
+if missing:
+    print(f"[WARN] Missing env vars: {missing} — you can still pass topic via query param.")
+
+producer = Producer(KAFKA_CONF)
+
+app = FastAPI(title="Group Load JSON → Kafka", version="1.0.0")
+
+
+def _delivery_report(err, msg):
+    if err is not None:
+        # You’ll see this in server logs; the API response also returns error details.
+        print(f"❌ Delivery failed: {err}")
+    else:
+        print(f"✅ Delivered to {msg.topic()} [{msg.partition()}] @ offset {msg.offset()}")
+
+
+def _produce_json(topic: str, payload_obj, key: Optional[str] = None):
+    try:
+        # Serialize once to ensure it’s valid JSON
+        payload_bytes = json.dumps(payload_obj, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+
+    if not key:
+        key = str(uuid.uuid4())
+
+    try:
+        producer.produce(topic=topic, key=key.encode("utf-8"), value=payload_bytes, callback=_delivery_report)
+        producer.flush(10)  # wait up to 10s for delivery
+    except BufferError as e:
+        raise HTTPException(status_code=503, detail=f"Local producer queue full: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Kafka publish failed: {e}")
+
+    return {"topic": topic, "message_key": key, "status": "sent"}
+
+
+class JsonBody(BaseModel):
+    payload: dict
+    message_key: Optional[str] = None
+
+
+@app.post("/produce-file")
+async def produce_file(
+    file: UploadFile = File(..., description="Upload a .json file containing a single JSON object."),
+    topic: Optional[str] = Query(None, description="Kafka topic. Defaults to KAFKA_TOPIC if omitted."),
+    message_key: Optional[str] = Query(None, description="Optional message key. If omitted, a UUID is used.")
+):
+    chosen_topic = topic or DEFAULT_TOPIC
+    if not chosen_topic:
+        raise HTTPException(status_code=400, detail="Topic not provided and KAFKA_TOPIC env var is unset.")
+
+    if not file.filename.lower().endswith(".json"):
+        raise HTTPException(status_code=400, detail="Please upload a .json file.")
+
+    try:
+        raw = await file.read()
+        payload_obj = json.loads(raw.decode("utf-8"))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not parse JSON file: {e}")
+
+    result = _produce_json(chosen_topic, payload_obj, message_key)
+    return JSONResponse(result)
+
+
+@app.post("/produce-json")
+async def produce_json(
+    body: JsonBody,
+    topic: Optional[str] = Query(None, description="Kafka topic. Defaults to KAFKA_TOPIC if omitted.")
+):
+    chosen_topic = topic or DEFAULT_TOPIC
+    if not chosen_topic:
+        raise HTTPException(status_code=400, detail="Topic not provided and KAFKA_TOPIC env var is unset.")
+    result = _produce_json(chosen_topic, body.payload, body.message_key)
+    return JSONResponse(result)
+
+
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok"}
+
+
+
+
+
+
+KAFKA_BOOTSTRAP=lkc-xxxxx.us-east4.gcp.confluent.cloud:9092
+KAFKA_API_KEY=SYXXXXXXX
+KAFKA_API_SECRET=ZyqXXXXXXXXXXXX
+KAFKA_TOPIC=gcp.pss.groupfl.mypbmcaa.dev.groupdetails
+CLIENT_ID=group-load-uploader
+
+
+
+
+
+fastapi
+uvicorn
+confluent-kafka
+python-multipart
