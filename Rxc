@@ -1,0 +1,155 @@
+package com.cvshealth.rxconnector.microservices.service.impl;
+
+import com.cvshealth.rxconnector.microservices.constants.AS400Constants;
+import com.cvshealth.rxconnector.microservices.constants.RxConnectorConstants;
+import com.cvshealth.rxconnector.microservices.exceptions.RxClaimErrorCode;
+import com.cvshealth.rxconnector.microservices.exceptions.RxConnectorException;
+import com.cvshealth.rxconnector.microservices.integration.AS400ConnectionManager;
+import com.cvshealth.rxconnector.microservices.request.RxClaimRequest;
+import com.cvshealth.rxconnector.microservices.response.RxClaimResponse;
+import com.cvshealth.rxconnector.microservices.service.RxConnectService;
+import com.cvshealth.rxconnector.microservices.util.RxConnectorUtil;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.springframework.stereotype.Service;
+
+@Service
+@Slf4j
+@RequiredArgsConstructor
+public class RxConnectServiceImpl implements RxConnectService {
+
+    private final AS400ConnectionManager as400ConnectionManager;
+
+    /**
+     * Main entry invoked by controller.
+     * Pads codes to AS400 field lengths, resolves environment (if not provided),
+     * and delegates to fetchRxClaimResponse.
+     */
+    @Override
+    public RxClaimResponse sboServiceCall(RxClaimRequest request) throws RxConnectorException {
+        // Pad transaction/action codes to fixed AS400 lengths
+        final String transactionCode =
+                RxConnectorUtil.pad(request.getTransactionCode(), AS400Constants.LENGTH_TRANSACTION_CODE);
+        final String actionCode =
+                RxConnectorUtil.pad(request.getActionCode(), AS400Constants.LENGTH_ACTION_CODE);
+
+        // If request didn't carry environment, default it from active spring profile
+        if (StringUtils.isBlank(request.getEnvironment())) {
+            final String[] activeProfiles = System.getProperty(
+                    "org.springframework.core.env.AbstractEnvironment.ACTIVE_PROFILES_PROPERTY_NAME", "default"
+            ).split(",");
+            request.setEnvironment((activeProfiles.length > 0 && StringUtils.isNotBlank(activeProfiles[0]))
+                    ? activeProfiles[0] : "default");
+        }
+
+        return fetchRxClaimResponse(request, transactionCode, actionCode);
+    }
+
+    /**
+     * Core orchestration. Validates input, calls AS400 manager, and maps the response.
+     */
+    public RxClaimResponse fetchRxClaimResponse(RxClaimRequest request,
+                                                String transactionCode,
+                                                String actionCode) {
+        RxClaimResponse rxClaimRes = new RxClaimResponse();
+
+        try {
+            // Basic input validation (controllers should also use @Valid)
+            if (StringUtils.isBlank(request.getSboRequest()) ||
+                StringUtils.isBlank(transactionCode) ||
+                StringUtils.isBlank(actionCode) ||
+                StringUtils.isBlank(request.getConsumer()) ||
+                StringUtils.isBlank(request.getEnvironment())) {
+
+                rxClaimRes.setErrorCode(String.valueOf(RxClaimErrorCode.INVALID_REQUEST_DATA));
+                rxClaimRes.setErrorMessage(RxConnectorConstants.ERROR_MSG_INV_TRANS);
+                return rxClaimRes;
+            }
+
+            // Execute against AS400 via the connection manager (handles retries/timeouts)
+            var response = as400ConnectionManager.execute(request, transactionCode, actionCode);
+
+            // Map success or error
+            if (response != null && StringUtils.isNotBlank(response.getResponseBody())) {
+                String strResponse = response.getResponseBody();
+
+                // If the AS400 response carries an internal error tag, normalize it
+                strResponse = createEdrErrorResponse(strResponse, rxClaimRes);
+                rxClaimRes.setResponseBody(strResponse);
+            } else {
+                rxClaimRes.setErrorCode(String.valueOf(RxClaimErrorCode.INVALID_RESPONSE));
+                rxClaimRes.setErrorMessage(RxConnectorConstants.ERROR_MSG_INV_RESP);
+            }
+
+        } catch (RxConnectorException e) {
+            log.error("RxConnectorException at RxConnectServiceImpl::fetchRxClaimResponse {}", ExceptionUtils.getStackTrace(e));
+
+            // Map well-known execution / timeout errors first
+            if (String.valueOf(RxClaimErrorCode.RXCLAIM_SBO_EXECUTE_ERROR).equals(e.getErrorCode()) ||
+                String.valueOf(RxClaimErrorCode.RXCLAIM_REQUEST_TIMEOUT).equals(e.getErrorCode())) {
+
+                String errMsg = StringUtils.isNotBlank(e.getCustomErrorMessage()) ? e.getCustomErrorMessage() : e.getMessage();
+                rxClaimRes.setErrorCode(e.getErrorCode());
+                rxClaimRes.setErrorMessage(errMsg);
+            } else {
+                // Generic mapping
+                String errMsg = StringUtils.defaultIfBlank(e.getCustomErrorMessage(), e.getMessage());
+                rxClaimRes.setErrorCode(e.getErrorCode());
+                rxClaimRes.setErrorMessage(errMsg);
+            }
+
+        } catch (Exception e) {
+            log.error("Exception at RxConnectServiceImpl::fetchRxClaimResponse {}", ExceptionUtils.getStackTrace(e));
+            rxClaimRes.setErrorCode(String.valueOf(RxClaimErrorCode.ADMIN_ERROR));
+            rxClaimRes.setErrorMessage("Error while generating response");
+        }
+
+        return rxClaimRes;
+    }
+
+    /**
+     * Normalizes error fragments coming back from RxClaim AS400 by
+     * replacing message ID/short-text with service-standard tags.
+     * If there's no error tag, returns the string unchanged.
+     */
+    private String createEdrErrorResponse(String strResponse, RxClaimResponse rxClaimRes) {
+        if (StringUtils.isBlank(strResponse)) {
+            return strResponse;
+        }
+
+        // Your constants indicate these tags exist in the payload; replace with standard text.
+        if (strResponse.contains(RxConnectorConstants.ETR_ERROR_TAG)) {
+            // extract or normalize the error and ID portions
+            String normalized = strResponse;
+
+            // Replace message id tag
+            normalized = normalized.replaceAll(
+                    RxConnectorConstants.MESSAGE_ID_TAG.concat(RxConnectorConstants.PATTERN_ANY)
+                            .concat(RxConnectorConstants.MESSAGE_ID_END_TAG),
+                    RxConnectorConstants.MESSAGE_ID_TAG.concat("AS400")
+                            .concat(RxConnectorConstants.MESSAGE_ID_END_TAG)
+            );
+
+            // Replace short-text tag
+            normalized = normalized.replaceAll(
+                    RxConnectorConstants.SHORTEXT_TAG.concat(RxConnectorConstants.PATTERN_ANY)
+                            .concat(RxConnectorConstants.SHORTTEXT_END_TAG),
+                    RxConnectorConstants.SHORTEXT_TAG.concat("AS400 Application Error")
+                            .concat(RxConnectorConstants.SHORTTEXT_END_TAG)
+            );
+
+            // Set a mapped error code if not already present
+            if (StringUtils.isBlank(rxClaimRes.getErrorCode())) {
+                rxClaimRes.setErrorCode(RxConnectorConstants.ERROR_CODE_MAP
+                        .getOrDefault(RxConnectorConstants.ERROR_CODE_IMP, String.valueOf(RxClaimErrorCode.INVALID_REQUEST_DATA)));
+            }
+
+            return normalized;
+        }
+
+        return strResponse;
+    }
+}
