@@ -1,0 +1,16 @@
+@SuppressWarnings("unchecked")
+@Override
+public List<Invoice> filterSentInvoicesByAccountNumber(String bankAccountFilter, long bankAccountId) {
+
+    String query = String.join(" ",
+            "SELECT i.* FROM invoice AS i",
+            "JOIN bank_account AS ba ON i.seller_id = ba.id AND i.buyer_id = ba.Id",
+            "WHERE ba.account_number LIKE CONCAT('%', :bankAccountFilter, '%')",
+            "AND i.buyer_id = :bankAccountId"
+    );
+
+    return entityManager.createNativeQuery(query, Invoice.class)
+            .setParameter("bankAccountFilter", bankAccountFilter)
+            .setParameter("bankAccountId", bankAccountId)
+            .getResultList();
+}
