@@ -1,10 +1,13 @@
-@Override
-public List<Invoice> filterReceivedInvoicesByAccountNumber(String bankAccountFilter, long bankAccountId) {
+package vikingbank.web;
 
-    String query =
-            "SELECT i.* FROM invoice i " +
-            "JOIN bank_account ba ON i.seller_id = ba.id AND i.buyer_id = ? " +
-            "WHERE ba.account_number LIKE CONCAT('%', ?, '%')";
+import org.springframework.data.repository.CrudRepository;
+import java.util.List;
 
-    return jdbcTemplate.query(query, Invoice::fromRow, bankAccountId, bankAccountFilter);
+public interface TransactionRepository extends CrudRepository<Transaction, Long> {
+
+    List<Transaction> findByOwnerAccountIdAndAmountBetweenOrderByTimestampDesc(
+            Long ownerAccountId,
+            Long minAmount,
+            Long maxAmount
+    );
 }
