@@ -3,11 +3,13 @@ package vikingbank.web;
 import org.springframework.data.repository.CrudRepository;
 import java.util.List;
 
+import vikingbank.web.entities.Transaction;
+
 public interface TransactionRepository extends CrudRepository<Transaction, Long> {
 
     List<Transaction> findByOwnerAccount_IdAndAmountBetweenOrderByTimestampDesc(
-            Long ownerAccountId,
-            Long minAmount,
-            Long maxAmount
+            long ownerAccountId,
+            double minAmount,
+            double maxAmount
     );
 }
