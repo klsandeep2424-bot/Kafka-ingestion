@@ -1,15 +1,10 @@
 @Override
-@SuppressWarnings("unchecked")
-public List<Invoice> filterSentInvoicesByAccountNumber(String bankAccountFilter, long bankAccountId) {
+public List<Invoice> filterReceivedInvoicesByAccountNumber(String bankAccountFilter, long bankAccountId) {
 
     String query =
-        "SELECT i.* FROM invoice i " +
-        "JOIN bank_account ba ON i.seller_id = :bankAccountId AND i.buyer_id = ba.id " +
-        "WHERE ba.account_number LIKE CONCAT('%', :bankAccountFilter, '%')";
+            "SELECT i.* FROM invoice i " +
+            "JOIN bank_account ba ON i.seller_id = ba.id AND i.buyer_id = ? " +
+            "WHERE ba.account_number LIKE CONCAT('%', ?, '%')";
 
-    return entityManager
-            .createNativeQuery(query, Invoice.class)
-            .setParameter("bankAccountId", bankAccountId)
-            .setParameter("bankAccountFilter", bankAccountFilter)
-            .getResultList();
+    return jdbcTemplate.query(query, Invoice::fromRow, bankAccountId, bankAccountFilter);
 }
