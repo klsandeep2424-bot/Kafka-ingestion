@@ -18,8 +18,8 @@ SELECT
     ndc,
     channel,
     claim_count,
-    COUNT(*) AS repeat_count
+    COUNT(*) AS occurrences
 FROM highest_rows
 GROUP BY ndc, channel, claim_count
 HAVING COUNT(*) > 1
-ORDER BY repeat_count DESC, ndc, channel;
+ORDER BY occurrences DESC, ndc;
