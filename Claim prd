@@ -1,15 +1,23 @@
-package vikingbank.web;
-
-import org.springframework.data.repository.CrudRepository;
-import java.util.List;
-
-import vikingbank.web.entities.Transaction;
-
-public interface TransactionRepository extends CrudRepository<Transaction, Long> {
-
-    List<Transaction> findByOwnerAccount_IdAndAmountBetweenOrderByTimestampDesc(
-            long ownerAccountId,
-            double minAmount,
-            double maxAmount
-    );
-}
+WITH ranked_data AS (
+    SELECT
+        *,
+        MAX(claim_count) OVER (
+            PARTITION BY ndc, channel, days_supply
+        ) AS max_claim_count
+    FROM pscdsapp.claim_quantity_history
+    WHERE ndc = '58151015677'
+)
+SELECT
+    ndc,
+    gpi,
+    drug_name,
+    quantity_dispensed,
+    days_supply,
+    channel,
+    claim_count,
+    add_timestamp,
+    change_timestamp,
+    last_updated
+FROM ranked_data
+WHERE claim_count = max_claim_count
+ORDER BY channel, days_supply, quantity_dispensed DESC;
