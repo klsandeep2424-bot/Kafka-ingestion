@@ -1,39 +1,25 @@
-WITH ranked_data AS (
-    SELECT
-        *,
-        MAX(claim_count) OVER (
-            PARTITION BY ndc, channel, days_supply
-        ) AS max_claim_count
-    FROM pscdsapp.claim_quantity_history
-),
-tie_data AS (
+WITH max_claim AS (
     SELECT
         ndc,
         channel,
-        days_supply,
-        max_claim_count,
-        COUNT(*) AS tied_row_count
-    FROM ranked_data
-    WHERE claim_count = max_claim_count
-    GROUP BY ndc, channel, days_supply, max_claim_count
-    HAVING COUNT(*) > 1
+        MAX(claim_count) AS max_claim_count
+    FROM pscdsapp.claim_quantity_history
+    GROUP BY ndc, channel
+),
+highest_rows AS (
+    SELECT q.*
+    FROM pscdsapp.claim_quantity_history q
+    JOIN max_claim m
+      ON q.ndc = m.ndc
+     AND q.channel = m.channel
+     AND q.claim_count = m.max_claim_count
 )
 SELECT
-    r.ndc,
-    r.gpi,
-    r.drug_name,
-    r.quantity_dispensed,
-    r.days_supply,
-    r.channel,
-    r.claim_count,
-    r.add_timestamp,
-    r.change_timestamp,
-    r.last_updated
-FROM ranked_data r
-JOIN tie_data t
-  ON r.ndc = t.ndc
- AND r.channel = t.channel
- AND r.days_supply = t.days_supply
- AND r.max_claim_count = t.max_claim_count
-WHERE r.claim_count = r.max_claim_count
-ORDER BY r.ndc, r.channel, r.days_supply, r.quantity_dispensed DESC;
+    ndc,
+    channel,
+    claim_count,
+    COUNT(*) AS repeat_count
+FROM highest_rows
+GROUP BY ndc, channel, claim_count
+HAVING COUNT(*) > 1
+ORDER BY repeat_count DESC, ndc, channel;
