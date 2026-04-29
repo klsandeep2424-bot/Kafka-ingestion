@@ -5,19 +5,35 @@ WITH ranked_data AS (
             PARTITION BY ndc, channel, days_supply
         ) AS max_claim_count
     FROM pscdsapp.claim_quantity_history
-    WHERE ndc = '58151015677'
+),
+tie_data AS (
+    SELECT
+        ndc,
+        channel,
+        days_supply,
+        max_claim_count,
+        COUNT(*) AS tied_row_count
+    FROM ranked_data
+    WHERE claim_count = max_claim_count
+    GROUP BY ndc, channel, days_supply, max_claim_count
+    HAVING COUNT(*) > 1
 )
 SELECT
-    ndc,
-    gpi,
-    drug_name,
-    quantity_dispensed,
-    days_supply,
-    channel,
-    claim_count,
-    add_timestamp,
-    change_timestamp,
-    last_updated
-FROM ranked_data
-WHERE claim_count = max_claim_count
-ORDER BY channel, days_supply, quantity_dispensed DESC;
+    r.ndc,
+    r.gpi,
+    r.drug_name,
+    r.quantity_dispensed,
+    r.days_supply,
+    r.channel,
+    r.claim_count,
+    r.add_timestamp,
+    r.change_timestamp,
+    r.last_updated
+FROM ranked_data r
+JOIN tie_data t
+  ON r.ndc = t.ndc
+ AND r.channel = t.channel
+ AND r.days_supply = t.days_supply
+ AND r.max_claim_count = t.max_claim_count
+WHERE r.claim_count = r.max_claim_count
+ORDER BY r.ndc, r.channel, r.days_supply, r.quantity_dispensed DESC;
