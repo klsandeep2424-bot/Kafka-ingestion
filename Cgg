@@ -1,0 +1,363 @@
+/*
+ * CDH Accums Reporting API - Build Configuration
+ *
+ * Key Features:
+ * - PostgreSQL database for configuration data
+ * - Support for all environments: dev, int, qa, local
+ *
+ * Upgraded to Spring Boot 3.5.15 and Spring Framework 6.2.19
+ * Security fixes applied based on Snyk SCA scan results
+ */
+
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.5.15'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'jacoco'
+    id 'maven-publish'
+}
+
+group = 'com.cvs.cdh.accums.reporting'
+version = '1.0.0'
+
+java {
+    sourceCompatibility = '21'
+    targetCompatibility = '21'
+}
+
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
+
+    javaagent {
+        // Make the javaagent configuration lenient - don't fail on missing dependencies
+        resolutionStrategy {
+            failOnVersionConflict()
+        }
+    }
+}
+
+/*
+ * SNYK FIX:
+ * Force vulnerable transitive dependencies to safe versions.
+ */
+configurations.all {
+    resolutionStrategy {
+        eachDependency { details ->
+            if (details.requested.group == 'io.netty') {
+                details.useVersion '4.1.135.Final'
+                details.because 'Fix Netty Snyk high severity vulnerabilities'
+            }
+
+            if (details.requested.group == 'org.bouncycastle'
+                    && ['bcprov-jdk18on', 'bcpkix-jdk18on', 'bcutil-jdk18on'].contains(details.requested.name)) {
+                details.useVersion '1.84'
+                details.because 'Fix Bouncy Castle Snyk high severity vulnerabilities'
+            }
+
+            if (details.requested.group == 'commons-fileupload'
+                    && details.requested.name == 'commons-fileupload') {
+                details.useVersion '1.6.0'
+                details.because 'Fix Commons FileUpload Snyk high severity vulnerability'
+            }
+        }
+    }
+}
+
+repositories {
+    mavenCentral()
+
+    maven {
+        name = 'nexus-cvshealth'
+        url = uri('https://nexus-ha.cvshealth.com:9443/repository/lib-release-local-xplabs')
+    }
+
+    maven {
+        name = 'nexus-aetna'
+        url = uri('https://repo-man.aetna.com/nexus/content/groups/ae-build-group')
+    }
+
+    maven {
+        name = 'nexus-aetna-internal'
+        url = uri('https://repo-man.aetna.com/nexus/content/repositories/ae-internal-release-hosted')
+    }
+
+    maven {
+        name = 'jfrog'
+        url = uri('https://cvsh.jfrog.io/artifactory/cvsdigital-maven')
+        credentials {
+            username = System.getenv("ARTIFACTORY_USERNAME") ?: project.findProperty("artifactoryUsername") ?: ""
+            password = System.getenv("ARTIFACTORY_TOKEN") ?: project.findProperty("artifactoryToken") ?: ""
+        }
+    }
+}
+
+ext {
+    set('springCloudVersion', "2025.0.0")
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-aop'
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+    developmentOnly 'org.springframework.boot:spring-boot-devtools'
+    annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
+
+    // Spring Cloud OpenFeign
+    implementation 'org.springframework.cloud:spring-cloud-starter-openfeign'
+
+    // Springdoc OpenAPI
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.6'
+
+    // Apache Commons
+    implementation 'org.apache.commons:commons-lang3:3.18.0'
+
+    // Jackson
+    implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-xml:2.18.7'
+
+    // PostgreSQL
+    implementation 'org.postgresql:postgresql:42.7.11'
+
+    // Spring Retry
+    implementation 'org.springframework.retry:spring-retry:2.0.13'
+
+    // Hibernate Validator
+    implementation 'org.hibernate.validator:hibernate-validator:8.0.2.Final'
+
+    // Vault
+    implementation 'org.springframework.vault:spring-vault-core:3.2.1'
+
+    // OpenTelemetry Java agent
+    javaagent 'com.cvshealth.devex.otel:opentelemetry-javaagent:2.9.0'
+
+    // OpenTelemetry API
+    implementation 'io.opentelemetry:opentelemetry-api:1.62.0'
+    implementation 'io.opentelemetry:opentelemetry-context:1.62.0'
+
+    // Lombok
+    compileOnly 'org.projectlombok:lombok:1.18.36'
+    annotationProcessor 'org.projectlombok:lombok:1.18.36'
+    testCompileOnly 'org.projectlombok:lombok:1.18.36'
+    testAnnotationProcessor 'org.projectlombok:lombok:1.18.36'
+
+    // Resilience4j
+    implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.2.0'
+    implementation 'io.github.resilience4j:resilience4j-circuitbreaker:2.2.0'
+    implementation 'io.github.resilience4j:resilience4j-annotations:2.2.0'
+
+    // Additional dependencies
+    implementation 'net.minidev:json-smart:2.5.2'
+
+    /*
+     * SNYK FIXES
+     */
+    implementation 'io.netty:netty-codec-http2:4.1.135.Final'
+    implementation 'io.netty:netty-codec-http:4.1.135.Final'
+    implementation 'org.bouncycastle:bcprov-jdk18on:1.84'
+    implementation 'org.bouncycastle:bcpkix-jdk18on:1.84'
+    implementation 'commons-fileupload:commons-fileupload:1.6.0'
+
+    // Test dependencies
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation 'org.mockito:mockito-core'
+    testImplementation 'com.h2database:h2:2.3.232'
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+        mavenBom "org.springframework.boot:spring-boot-dependencies:3.5.15"
+
+        // SNYK FIX: keep all Netty modules on same safe version
+        mavenBom "io.netty:netty-bom:4.1.135.Final"
+    }
+
+    dependencies {
+        // Spring Framework 6.2.19
+        dependency 'org.springframework:spring-webmvc:6.2.19'
+        dependency 'org.springframework:spring-core:6.2.19'
+        dependency 'org.springframework:spring-beans:6.2.19'
+        dependency 'org.springframework:spring-web:6.2.19'
+        dependency 'org.springframework:spring-context:6.2.19'
+        dependency 'org.springframework:spring-aop:6.2.19'
+        dependency 'org.springframework:spring-expression:6.2.19'
+        dependency 'org.springframework:spring-tx:6.2.19'
+        dependency 'org.springframework:spring-jdbc:6.2.19'
+        dependency 'org.springframework:spring-orm:6.2.19'
+        dependency 'org.springframework:spring-aspects:6.2.19'
+
+        // Spring Data
+        dependency 'org.springframework.data:spring-data-commons:3.5.12'
+        dependency 'org.springframework.data:spring-data-jpa:3.5.12'
+
+        // Micrometer
+        dependency 'io.micrometer:micrometer-core:1.15.12'
+        dependency 'io.micrometer:micrometer-jakarta9:1.15.12'
+
+        // Jackson
+        dependency 'com.fasterxml.jackson.core:jackson-core:2.18.7'
+        dependency 'com.fasterxml.jackson.core:jackson-databind:2.18.7'
+        dependency 'com.fasterxml.jackson.core:jackson-annotations:2.18.7'
+        dependency 'com.fasterxml.jackson.dataformat:jackson-dataformat-xml:2.18.7'
+        dependency 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.18.7'
+        dependency 'com.fasterxml.jackson.datatype:jackson-datatype-jdk8:2.18.7'
+        dependency 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.18.7'
+        dependency 'com.fasterxml.jackson.module:jackson-module-parameter-names:2.18.7'
+
+        // Tomcat
+        dependency 'org.apache.tomcat.embed:tomcat-embed-core:10.1.55'
+        dependency 'org.apache.tomcat.embed:tomcat-embed-websocket:10.1.55'
+        dependency 'org.apache.tomcat.embed:tomcat-embed-el:10.1.55'
+
+        // Logback
+        dependency 'ch.qos.logback:logback-core:1.5.25'
+        dependency 'ch.qos.logback:logback-classic:1.5.25'
+
+        // SNYK FIXES
+        dependency 'io.netty:netty-codec-http2:4.1.135.Final'
+        dependency 'io.netty:netty-codec-http:4.1.135.Final'
+        dependency 'org.bouncycastle:bcprov-jdk18on:1.84'
+        dependency 'org.bouncycastle:bcpkix-jdk18on:1.84'
+        dependency 'org.bouncycastle:bcutil-jdk18on:1.84'
+        dependency 'commons-fileupload:commons-fileupload:1.6.0'
+    }
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    finalizedBy jacocoTestReport
+    systemProperty 'spring.profiles.active', 'test'
+
+    jvmArgs = [
+            '-Xmx1g',
+            '-XX:+UseG1GC',
+            '-XX:+UseStringDeduplication'
+    ]
+}
+
+jacoco {
+    toolVersion = "0.8.11"
+    reportsDirectory = layout.buildDirectory.dir('customJacocoReportDir')
+}
+
+jacocoTestReport {
+    dependsOn test
+
+    reports {
+        xml.required = true
+        xml.outputLocation.set(layout.buildDirectory.file("reports/jacoco/test/jacoco.xml"))
+        html.required = true
+    }
+
+    afterEvaluate {
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: [
+                    'com/cvs/cdh/accums/reporting/util/**',
+                    'com/cvs/cdh/accums/reporting/config/**'
+            ])
+        }))
+    }
+}
+
+// Define a task to copy OpenTelemetry agent
+task copyAgent(type: Copy) {
+    def libsDir = file("$buildDir/libs")
+
+    into libsDir
+    from configurations.javaagent
+    include "opentelemetry-javaagent*.jar"
+}
+
+// Make copyAgent optional
+copyAgent.onlyIf {
+    try {
+        configurations.javaagent.resolve()
+        return true
+    } catch (Exception e) {
+        logger.warn("OpenTelemetry agent not available credentials may be missing: ${e.message}")
+        return false
+    }
+}
+
+tasks.named('bootRun') {
+    doFirst {
+        def agentFiles = fileTree(dir: "$buildDir/libs", include: "opentelemetry-javaagent*.jar").files
+
+        if (!agentFiles.isEmpty()) {
+            def agentJar = agentFiles.first()
+
+            jvmArgs = [
+                    "-javaagent:${agentJar.absolutePath}",
+
+                    // Disable OpenTelemetry export for local development to avoid connection errors
+                    "-Dotel.traces.exporter=none",
+                    "-Dotel.metrics.exporter=none",
+                    "-Dotel.logs.exporter=none",
+
+                    // Ensure traceparent propagation is enabled
+                    "-Dotel.propagators=tracecontext,baggage",
+                    "-Dotel.traces.sampler=parentbased_always_on",
+
+                    // Disable servlet instrumentation so filter can set trace context first
+                    "-Dotel.instrumentation.servlet.enabled=false",
+
+                    // Keep Spring WebMVC instrumentation enabled
+                    "-Dotel.instrumentation.spring-web.enabled=true"
+            ]
+
+            logger.lifecycle("Running with OpenTelemetry agent: ${agentJar.name}")
+        } else {
+            logger.warn("OpenTelemetry agent not found - running without instrumentation")
+        }
+    }
+}
+
+// Make copyAgent optional for the build
+build.finalizedBy copyAgent
+
+tasks.register('rebuild') {
+    dependsOn clean
+    finalizedBy build
+}
+
+bootJar {
+    archiveFileName = "${project.name}.jar"
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+            artifactId = 'cdh-accums-reporting-api'
+
+            versionMapping {
+                usage('java-api') {
+                    fromResolutionOf('runtimeClasspath')
+                }
+                usage('java-runtime') {
+                    fromResolutionResult()
+                }
+            }
+        }
+    }
+
+    repositories {
+        maven {
+            name = 'nexus'
+            def releasesRepoUrl = 'https://nexus-ha.cvshealth.com:9443/repository/lib-release-local-xplabs'
+            url = uri(releasesRepoUrl)
+
+            credentials {
+                username = System.env.NEXUS_USERNAME
+                password = System.env.NEXUS_PASSWORD
+            }
+        }
+    }
+}
